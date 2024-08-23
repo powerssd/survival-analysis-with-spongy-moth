@@ -1,0 +1,645 @@
+---
+title: "Adult survival in response to larval acclimation in spongy moth"
+author: "Sean Powers, PhD and Kristine Grayson, PhD"
+output: 
+  bookdown::html_document2:
+    toc: true
+    toc_float: true
+---
+
+# Experiment
+
+We were interested in how developmental temperature of spongy moth during the larva stage (caterpillar) and pupa stage impacted survival during the adult stage (moth) when adults are exposed to different temperatures.
+
+Spongy moth eggs from the USDA OTIS laboratory were were hatched and group reared at either 23ºC, 26ºC, or 29ºC (larval acclimation temperature). Larvae (caterpillars) were held in their acclimation treatment until they transitioned to the adult stage (moth). When a larva transitioned to a pupa, it was weighed, placed into a new container by itself, and then placed back into its acclimation temperature. When an adult emerged from its pupa, it was transferred to either 26ºC, 29ºC, 32ºC, or 35ºC (adult exposure temperature). While in its adult exposure temperature, adults were checked twice daily (morning & afternoon) to see if it was alive or dead. Once an adult died, its death date was recorded.
+
+```{r packages, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(gghalves)
+library(ggpubr)
+library(survival)
+library(survminer)
+library(ggsurvfit)
+library(broom)
+library(easystats)
+library(MuMIn)
+library(patchwork)
+library(emmeans)
+```
+
+# Experimental data
+
+```{r importing data, message=FALSE}
+survival_data <- read_csv('LD OTIS_pupa mass_adult survival_all temps.csv')
+
+survival_data %>% head() 
+```
+
+## Column data
+
+1.  `id`: individual ID number
+2.  `stock_date`: date the experiment started and larvae were placed into different treatments
+3.  `pupa_date`: date a larvae transitioned to a pupa
+4.  `pupa_mass`: mass of pupa, measured on `pupa_date`
+5.  `sex`: sex of pupa, determined after enclosion (emergence from pupa)
+6.  `acc_temp`: larval acclimation temperature measured in ºC
+7.  `survival_temp`: adult exposure temperature measured in ºC
+8.  `emerge_date`: date the adult moth emerged from pupa
+9.  `emerge_TOD`: time of day (AM or PM) the adult moth emerged
+10. `death_date`: date an adult moth died
+11. `death_TOD`: time of day an adult moth died
+12. `notes`: additional notes for an individial
+
+# Exploration of data
+
+First we created a new data frame which included development time (number of days individuals were caterpillars) and survival time (how days an adult moth lived).
+
+```{r}
+total_survival_days <- 
+  survival_data %>% 
+  mutate(
+    development_time = yday(pupa_date) - yday(stock_date), # development time in days
+    adjust_tod = case_when(                                # accounting for the time of day when a pupa
+      (emerge_TOD == death_TOD) ~ 0.0,                     # emerged and when it died as a moth
+      (emerge_TOD == 'AM' & death_TOD == 'PM') ~ 0.5, 
+      (emerge_TOD == 'PM' & death_TOD == 'AM') ~ -0.5
+    ),
+    survival_time = yday(death_date) - yday(emerge_date) + adjust_tod # survival time in days
+  ) %>% 
+  select(id, pupa_mass:survival_temp, development_time, survival_time)
+
+total_survival_days %>% head()
+```
+
+## Larval development time
+
+### Box plots
+
+```{r}
+total_survival_days %>% 
+  select(sex:development_time) %>% 
+  drop_na() %>% 
+  ggplot(
+    aes(
+      x = acc_temp %>% as_factor(),
+      y = development_time,
+      fill = acc_temp %>% as_factor()
+    )
+  ) +
+  geom_boxplot(
+    position = position_nudge(x = -0.1),
+    width = 0.3
+    ) +
+  geom_half_violin(
+    side = 'r',
+    position = position_nudge(x = 0.1)
+    ) +
+  labs(
+    title = 'Development time of spongy moth caterpillars',
+    x = 'Larval Acclimation temperature (°C)',
+    y = 'Development time (days)',
+  ) +
+  facet_wrap(~ sex, ncol = 2)+
+  scale_fill_manual(values = c('#2c7bb6', '#fdae61', '#d7191c')) +
+  theme_pubr() + 
+  theme(legend.position = 'none')
+```
+
+```{r message=FALSE}
+total_survival_days %>% 
+  select(id, sex, acc_temp, development_time) %>% 
+  drop_na() %>% 
+  group_by(sex, acc_temp) %>% 
+  summarise(
+    n = n(),
+    dev_time = mean(development_time),
+    st_dev = sd(development_time),
+    lower_ci = t.test(development_time, mu = mean(development_time))$conf.int[1],
+    upper_ci = t.test(development_time, mu = mean(development_time))$conf.int[2]
+    ) %>% 
+  export_table()
+```
+
+Data for development time of spongy moth cateripllars show that development time decreased as larval acclimation temperature increased for both sexes. With males having shorter development times relative to females.
+
+### Analysis of variance
+
+This was confirmed by an ANOVA that showed the effects of acclimation temperature and sex were significant factors for development time.
+
+```{r}
+dev_time_lm <- 
+  lm(development_time ~ acc_temp + sex, data = total_survival_days)
+
+dev_time_lm %>% 
+  anova() %>% 
+  tidy() %>% 
+  export_table()
+```
+
+## Pupal mass
+
+### Box plots
+
+```{r}
+total_survival_days %>% 
+  select(pupa_mass:acc_temp) %>% 
+  drop_na() %>% 
+  ggplot(
+    aes(
+      x = acc_temp %>% as_factor(),
+      y = pupa_mass,
+      fill = acc_temp %>% as_factor()
+    )
+  ) +
+  geom_boxplot(
+    position = position_nudge(x = -0.1),
+    width = 0.3
+    ) +
+  geom_half_violin(
+    side = 'r',
+    position = position_nudge(x = 0.1)
+    ) +
+  labs(
+    title = 'Mass of spongy moth pupa',
+    x = 'Larval acclimation temperature (°C)',
+    y = 'Pupal mass (g)',
+  ) +
+  facet_wrap(~ sex, ncol = 2)+
+  scale_fill_manual(values = c('#2c7bb6', '#fdae61', '#d7191c')) +
+  theme_pubr() + 
+  theme(legend.position = 'none')
+```
+
+```{r}
+total_survival_days %>% 
+  group_by(sex) %>% 
+  summarise(
+    pupal_mass = mean(pupa_mass, na.rm = TRUE),
+    st_dev = sd(pupa_mass, na.rm = TRUE)
+    ) %>% 
+  export_table()
+```
+
+Box plots show that female pupa were heavier than male pupa and indicate that acclimation temperature had no effect on pupa mass within each sex.
+
+### Analysis of variance
+
+```{r}
+pmass_lm <- 
+  lm(pupa_mass ~ acc_temp + sex, data = total_survival_days)
+
+pmass_lm %>% 
+  anova() %>% 
+  tidy() %>% 
+  export_table()
+```
+
+## Total days adults survived
+
+```{r}
+surv_tmps <- c('26°C', '29°C', '32°C', '35°C')
+names(surv_tmps) <- c('26', '29', '32', '35')
+
+total_survival_days %>% 
+  select(sex:survival_temp, survival_time) %>% 
+  drop_na() %>% 
+  ggplot(
+    aes(
+      x = acc_temp %>% as_factor(),
+      y = survival_time,
+      fill = acc_temp %>% as_factor()
+    )
+  ) +
+  geom_boxplot(color = 'black') +
+  scale_fill_manual(values = c('#2c7bb6', '#fdae61', '#d7191c')) +
+  labs(
+    title = 'Total days adult spongy moth survived',
+    x = 'Larval acclimation temperature (°C)',
+    y = 'Survival time (days)',
+  ) +
+  facet_grid(
+    sex ~ survival_temp,
+    labeller = labeller(survival_temp = surv_tmps)
+    ) +
+  theme_pubr() + 
+  theme(
+    legend.position = 'none',
+    aspect.ratio = 1
+    )
+```
+
+Box plots are arranged by adult exposure temperature (columns) and sex (rows). These box plots indicate that:
+
+1.  The number of days adults survived decreased with warmer adult exposure temperatures (columns, left-to-right)
+2.  Females survived longer relative to males
+3.  Warmer larval acclimation temperatures improved male survival, but not female survival
+
+### Sample sizes by treatments
+
+```{r message=FALSE}
+total_survival_days %>% 
+  group_by(sex, acc_temp, survival_temp) %>% 
+  summarise(N = n()) %>% 
+  export_table()
+```
+
+## Survival probability over time
+
+### Reshaping data for analysis
+
+```{r}
+# dataframe for survival by day for each individual
+survival_by_day <- 
+  total_survival_days %>% 
+  select(-pupa_mass, -development_time) %>% 
+  drop_na() %>% 
+  mutate(half_days = survival_time * 2) %>%  # number of half days alive
+  uncount(half_days) %>% 
+  group_by(id) %>% 
+  mutate(    
+    time_d = 
+      (seq(survival_time[1], length.out = n(), by = -0.5)) - 1  # creating and filling 
+    ) %>%                                                       # in time data
+  arrange(id, time_d) %>% 
+  filter(time_d >= 0) %>% 
+  mutate(survival = if_else(time_d == survival_time - 1, 0, 1))
+
+# setting up dataframe for survival analysis
+time1 <-  # creating start time column for each survival event
+  survival_by_day %>% 
+  select(-survival_time) %>% 
+  rename(
+    time_1 = time_d,
+    survival_1 = survival
+    ) %>% 
+  mutate(row = row_number())
+
+time2 <-  # creating end time column for each survival event
+  time1 %>% 
+  select(-row) %>%
+  filter(time_1 != 0) %>% 
+  mutate(row = row_number()) %>% 
+  rename(
+    time_2 = time_1,
+    survival_2 = survival_1
+  )
+
+adult_survival <- # merging the start and end time data to create survival analysis data frame
+  time1 %>% 
+  full_join(
+    time2,
+    by = c('id', 'sex', 'acc_temp', 'survival_temp', 'row')
+  ) %>% 
+  select(-survival_1, -row) %>% 
+  rename(survival = survival_2) %>% 
+  drop_na() %>% 
+  mutate(status = if_else(survival == 1, 0, 1))
+
+# dataframe for plot
+adult_survival_fac <- 
+  adult_survival %>% 
+  mutate(
+    acc_label = case_when(          # labels for larval acclimation temperature
+      acc_temp == 23 ~ '23°C',
+      acc_temp == 26 ~ '26°C',
+      acc_temp == 29 ~ '29°C'    
+      )
+    ) %>% 
+  mutate(
+    surv_label = case_when(         # labels for adult exposure temperature
+      survival_temp == 26 ~ '26°C', 
+      survival_temp == 29 ~ '29°C',
+      survival_temp == 32 ~ '32°C',
+      survival_temp == 35 ~ '35°C'
+    )
+  )
+
+```
+
+### Kaplan-Meier survival curves
+
+```{r fig.height=8, fig.width=7}
+# fitting kaplan-Meier survival curve
+ld_fit <- 
+  survfit(
+    Surv(time_1, time_2, status) ~ sex + acc_label + surv_label, 
+    id = id,
+    data = adult_survival_fac
+  )
+
+# results from fitted kaplan-Meier curve
+ld_summary <- 
+  ld_fit %>% 
+  tidy_survfit() %>% 
+  separate_wider_delim(
+    strata,
+    delim = ',',
+    names = c('sex', 'acc_temp', 'survival_temp')
+  ) %>% 
+  relocate(sex:survival_temp, .before = time)
+
+# plot
+ggsurvplot_facet(
+  fit = ld_fit,
+  data = adult_survival_fac,
+  facet.by = c('surv_label', 'sex'),
+  short.panel.labs = TRUE,
+  palette = c('#2c7bb6', '#fdae61', '#d7191c'),
+  conf.int = TRUE,
+  ggtheme = theme_pubr()
+) +
+  labs(fill = 'Larval acclimation temp.',
+       color = 'Larval acclimation temp.',
+       x = 'Time (days)') 
+```
+
+Kaplan-Meier survival curves are arranged by sex (columns) and adult exposure temperature (rows). Line color of the curves represents the larval acclimation temperature. These survival curves show similar results to the box plots for how long adults adults lived:
+
+1.  Survival probability was lower at warmer adult exposure temperatures
+2.  Females were more likely to survive than males
+3.  Warmer larval acclimation temperatures improved male survival, but not female survival
+
+# Statistical analysis
+
+We used Cox proportional hazards regression to look more closely at the effects of larval acclimation temperature and sex on the survival probability of male and female adults.
+
+## Cox proportional hazards model
+
+To find the best model for analyzing our data we used Akaike Information Criteria (AICc) to compare 6 different candidate models that included sex and/or larval acclimation, adult exposure, and both sex-by-temperature interactions
+
+### Model selection by AICc
+
+```{r}
+ld_cox1 <- 
+  coxph(
+    Surv(time_1, time_2, status) ~ sex,
+    data = adult_survival
+    )
+
+ld_cox2 <- 
+  coxph(
+    Surv(time_1, time_2, status) ~ sex + survival_temp,
+    data = adult_survival
+    )
+
+ld_cox3 <- 
+  coxph(
+    Surv(time_1, time_2, status) ~ sex + survival_temp + acc_temp,
+    data = adult_survival
+    )
+
+ld_cox4 <- 
+  coxph(
+    Surv(time_1, time_2, status) ~ sex + acc_temp + survival_temp + sex:acc_temp,
+    data = adult_survival
+    )
+
+ld_cox5 <- 
+  coxph(
+    Surv(time_1, time_2, status) ~ sex + acc_temp + survival_temp + sex:survival_temp,
+    data = adult_survival
+    )
+
+ld_cox6 <- 
+  coxph(
+    Surv(time_1, time_2, status) ~ sex + acc_temp + survival_temp + sex:acc_temp + 
+      sex:survival_temp,
+    data = adult_survival
+    )
+best_model <-
+  model.sel(
+    ld_cox1,
+    ld_cox2,
+    ld_cox3,
+    ld_cox4,
+    ld_cox5,
+    ld_cox6
+    ) 
+
+best_model
+```
+
+The AICc rankings of our models show that the top ranked model included the main effects and a sex-by-larval acclimation temperature interaction.
+
+### Model summary
+
+```{r}
+ld_cox4 %>% 
+  tidy(exponentiate = TRUE, conf.int = TRUE) %>% 
+  rename(hazard.ratio = estimate) %>% 
+  format_table() %>% 
+  export_table()
+```
+
+Hazard ratios for the adult exposure temperature and sex indicate that likelihood of adult survival decreases significantly as temperature increases (-32% for every 1°C increase) and that males were 90.5 times more likely to experience lower adult survival relative to females. While this model indicates lower survival for adult males, the sex-by-larval acclimation hazard ratio indicates that warm temperature acclimation during the larval and pupa stages can significantly improve adult survival for males when exposed to supraoptimal temperatures as an adult (+14% for every 1°C increase).
+
+### Checking linearity assumption
+
+```{r}
+cox_resid <- 
+  tibble(
+    martingale_res = resid(ld_cox4, type = 'martingale'),
+    acc_temp = adult_survival$acc_temp,
+    survival_temp = adult_survival$survival_temp
+  )
+```
+
+```{r message=FALSE, warning=FALSE}
+cox_resid %>% 
+  ggplot(
+    aes(
+      x = acc_temp,
+      y = martingale_res
+    )
+  ) +
+  geom_point() +
+  geom_hline(yintercept = 0) +
+  geom_smooth(
+    color = 'blue',
+    method = 'loess',
+    linetype = 'dashed'
+  ) +
+  labs(
+    x = 'Acclimation temperature (°C)',
+    y = 'Martingale residual'
+  ) +
+  scale_x_continuous(
+    breaks = seq(23, 29, 1),
+    limits = c(23,29)
+  ) +
+  theme_pubr()
+```
+
+These plots indicate that the linearity assumption has not been violated.
+
+### Checking proportional hazards assumption
+
+Model assumes that the hazards between individuals have the same proportion at all times. Thus the model assumes that effect of each predictor remains constant with time.
+
+```{r fig.height=9, fig.width=7}
+ph_plots <- 
+  ld_cox4 %>% 
+  cox.zph() %>% 
+  ggcoxzph()
+
+ph_plots[[1]] +
+  ph_plots[[2]] +
+  ph_plots[[3]] +
+  ph_plots[[4]] +
+  plot_layout(ncol = 1)
+```
+
+While the Schoenfeld tests are significant, the plots indicate this assumption was not violated.
+
+### Plot of acclimation effect
+
+```{r warning=FALSE}
+sex_23C <- 
+  with(
+    adult_survival,
+    data.frame(
+      sex = c('Female', 'Male'),
+      acc_temp = c(23, 23),
+      survival_temp = c(35, 35)
+    )
+  )
+
+sex_26C <- 
+  with(
+    adult_survival,
+    data.frame(
+      sex = c('Female', 'Male'),
+      acc_temp = c(26, 26),
+      survival_temp = c(35, 35)
+    )
+  )
+
+sex_29C <- 
+  with(
+    adult_survival,
+    data.frame(
+      sex = c('Female', 'Male'),
+      acc_temp = c(29, 29),
+      survival_temp = c(35, 35)
+    )
+  )
+
+fit_23C <- survfit(ld_cox4, newdata = sex_23C)
+fit_26C <- survfit(ld_cox4, newdata = sex_26C)
+fit_29C <- survfit(ld_cox4, newdata = sex_29C)
+
+ggsurv_23C <-
+  ggsurvplot(
+    fit = fit_23C,
+    data = sex_23C,
+    conf.int = TRUE,
+    surv.median.line = 'hv',
+    censor = FALSE,
+    palette = c('#5e3c99', '#008837'),
+    xlim = c(0, 10),
+    break.x.by = 1, 
+    ggtheme = theme_pubr(),
+    legend = 'top',
+    legend.title = 'Sex',
+    legend.labs = c('Female', 'Male')
+  ) 
+
+ggsurv_26C <-
+  ggsurvplot(
+    fit = fit_26C,
+    data = sex_26C,
+    conf.int = TRUE,
+    surv.median.line = 'hv',
+    censor = FALSE,
+    palette = c('#5e3c99', '#008837'),
+    xlim = c(0, 10),
+    break.x.by = 1, 
+    ggtheme = theme_pubr(),
+    legend = 'none',
+  ) 
+
+ggsurv_29C <-
+  ggsurvplot(
+    fit = fit_29C,
+    data = sex_29C,
+    conf.int = TRUE,
+    surv.median.line = 'hv',
+    censor = FALSE,
+    palette = c('#5e3c99', '#008837'),
+    xlim = c(0, 10),
+    break.x.by = 1, 
+    ggtheme = theme_pubr(),
+    legend = 'none'
+  ) 
+
+plot_23C <- 
+  ggsurv_23C$plot +
+  annotate(
+    geom = 'text',
+    x = 9.5,
+    y = 0.9, 
+    label = '23°C',
+    fontface = 'bold',
+    color = '#2c7bb6',
+    size = 5
+  ) +
+  theme(
+    axis.line.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title = element_blank(),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 10)
+  )
+
+plot_26C <- 
+  ggsurv_26C$plot +
+  annotate(
+    geom = 'text',
+    x = 9.5,
+    y = 0.9, 
+    label = '26°C',
+    fontface = 'bold',
+    color = '#fdae61',
+    size = 5
+  ) +
+  theme(
+    axis.line.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text = element_text(size = 10),
+    axis.title.y = element_text(size = 10)
+  )
+
+plot_29C <- 
+  ggsurv_29C$plot +
+  labs(x = 'Time (days)') +
+  annotate(
+    geom = 'text',
+    x = 9.5,
+    y = 0.9, 
+    label = '29°C',
+    fontface = 'bold',
+    color = '#d7191c',
+    size = 5
+  ) +
+  theme(
+    axis.title.y = element_blank(),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 10)
+    )
+
+  plot_23C /
+  plot_26C /
+  plot_29C
+```
+
+# Conclusion
+
+Our statistical analysis confirm our observations of the total time that adult moths survived and what we saw with the Kaplan-Meier survival curves. We can conclude that:
+
+1.  Survival of adults generally declined as the adult exposure temperature got warmer
+2.  Overall, females tend to survive better than males
+3.  Larval acclimation improved male survival, but not female survival
