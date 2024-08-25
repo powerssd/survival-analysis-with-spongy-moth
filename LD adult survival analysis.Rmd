@@ -133,6 +133,7 @@ dev_time_lm <-
 dev_time_lm %>% 
   anova() %>% 
   tidy() %>% 
+  format_table() %>% 
   export_table()
 ```
 
@@ -191,6 +192,7 @@ pmass_lm <-
 pmass_lm %>% 
   anova() %>% 
   tidy() %>% 
+  format_table() %>% 
   export_table()
 ```
 

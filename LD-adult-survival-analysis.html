@@ -1610,11 +1610,12 @@ total_survival_days %&gt;% head()</code></pre>
 dev_time_lm %&gt;% 
   anova() %&gt;% 
   tidy() %&gt;% 
+  format_table() %&gt;% 
   export_table()</code></pre>
-<pre><code>## term      |  df |    sumsq |   meansq | statistic |   p.value
-## -------------------------------------------------------------
-## acc_temp  |   1 | 10009.75 | 10009.75 |   3352.57 | 1.15e-254
-## sex       |   1 |  2110.26 |  2110.26 |    706.79 | 4.72e-105
+<pre><code>## term      |  df |    sumsq |   meansq | statistic | p.value
+## -----------------------------------------------------------
+## acc_temp  |   1 | 10009.75 | 10009.75 |   3352.57 |  &lt; .001
+## sex       |   1 |  2110.26 |  2110.26 |    706.79 |  &lt; .001
 ## Residuals | 631 |  1883.97 |     2.99 |           |</code></pre>
 </div>
 </div>
@@ -1671,11 +1672,12 @@ dev_time_lm %&gt;%
 pmass_lm %&gt;% 
   anova() %&gt;% 
   tidy() %&gt;% 
+  format_table() %&gt;% 
   export_table()</code></pre>
-<pre><code>## term      |  df |    sumsq |   meansq | statistic |   p.value
-## -------------------------------------------------------------
-## acc_temp  |   1 | 1.93e-03 | 1.93e-03 |      0.01 |      0.91
-## sex       |   1 |   408.42 |   408.42 |   2767.49 | 6.83e-233
+<pre><code>## term      |  df |    sumsq |   meansq | statistic | p.value
+## -----------------------------------------------------------
+## acc_temp  |   1 | 1.93e-03 | 1.93e-03 |      0.01 |  0.909 
+## sex       |   1 |   408.42 |   408.42 |   2767.49 |  &lt; .001
 ## Residuals | 631 |    93.12 |     0.15 |           |</code></pre>
 </div>
 </div>
